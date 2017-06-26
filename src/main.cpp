@@ -87,10 +87,28 @@ int main() {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
+
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          double steer_angle = j[1]["steering_angle"];
+
+          vector<double> way_x;
+          vector<double> way_y;
+
+          // Transform waypoints in car coordinates
+          for (int i = 0; i < ptsx.size(); i++) {
+            way_x.push_back((ptsx[i] - px)*cos(psi) + (ptsy[i] - py)*sin(psi));
+            way_y.push_back(-(ptsx[i] - px)*sin(psi) + (ptsy[i] - py)*cos(psi));
+          }
+
+          // Converting way points to Eigen
+          double * ptrx = &way_x[0];
+          double * ptry = &way_y[0];
+
+          Eigen::Map<Eigen::VectorXd> way_x_eigen(ptrx, way_x.size());
+          Eigen::Map<Eigen::VectorXd> way_y_eigen(ptry, way_y.size());
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -98,8 +116,45 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
+
+          auto coeffs = polyfit(way_x_eigen, way_y_eigen, 3);
+
+          // Predict state after latency before passing to the solver
+          double dt = 0.1;
+          px = v * dt;
+          psi = -v * steer_angle * dt / 2.67;
+
+          // The cross track error is calculated by evaluating at polynomial at x, f(x)
+          // and subtracting y.
+          double cte = polyeval(coeffs, px);
+          // Due to the sign starting at 0, the orientation error is -f'(x).
+          // derivative of coeffs[0] + coeffs[1] * x -> coeffs[1]
+          double epsi = -atan(coeffs[1] + 2 * px * coeffs[2] + 3 * px * px * coeffs[2]);
+
+          Eigen::VectorXd state(6);
+          state << px, 0.0, psi, v, cte, epsi;
+
+          // Getting starting indices of state and actuators
+          vector<size_t> startInds = mpc.getStartInds();
+
+          auto vars = mpc.Solve(state, coeffs);
+
+          size_t x_start = startInds[0];
+          size_t y_start = startInds[1];
+          size_t psi_start = startInds[2];
+          size_t v_start = startInds[3];
+          size_t cte_start = startInds[4];
+          size_t epsi_start = startInds[5];
+          size_t delta_start = startInds[6];
+          size_t a_start = startInds[7];
+
+          //size_t N = y_start - x_start;
+
           double steer_value;
           double throttle_value;
+
+          steer_value = -vars[delta_start];
+          throttle_value = vars[a_start];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -107,26 +162,30 @@ int main() {
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
+          //Display the MPC predicted trajectory
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
+
+          for (int i = 1; i < 10; i++) {
+            mpc_x_vals.push_back(vars[x_start + i]);
+            mpc_y_vals.push_back(vars[y_start + i]);
+          }
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
+          msgJson["mpc_x"] = vars[0];
+          msgJson["mpc_y"] = vars[1];
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals = way_x;
+          vector<double> next_y_vals = way_y;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
-
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
