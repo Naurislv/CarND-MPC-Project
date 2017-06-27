@@ -1,6 +1,30 @@
 # CarND-Controls-MPC
 Self-Driving Car Engineer Nanodegree Program
 
+This project goal is to create fully functional MPC (Model Predictive Control) which is able autonomously drive car in virtual environment by following trajectory coordinates.
+
+The goals / steps of this project are the following:
+
+* Apply MPC to steering and throttle of a simulated car.
+* Compensate latency in control system (100ms).
+* Tune hyperparameters of controller so that car could autonomously drive a lap without living the track. No tire may leave the drivable portion of the track surface. The car may not pop up onto ledges or roll over any surfaces that would otherwise be considered unsafe (if humans were in the vehicle).
+
+[//]: # (Image References)
+
+[image1]: ./CarND_Controls_MPC.gif "Demo"
+[image2]: ./classic_model.png "Classic Model"
+[image3]: ./simplified_model.png "Simplified Model"
+[image4]: ./model_init.png "Model init"
+[image5]: ./psidot.png "Psi Dot"
+[image6]: ./model_cont.png "Model Cont"
+[image7]: ./model_descrete.png "Model Descrete"
+
+## Demo
+
+Full video available : https://www.youtube.com/watch?v=ba4u26A7mL4
+
+![alt text][image1]
+
 ---
 
 ## Dependencies
@@ -19,7 +43,7 @@ Self-Driving Car Engineer Nanodegree Program
   * Run either `install-mac.sh` or `install-ubuntu.sh`.
   * If you install from source, checkout to commit `e94b6e1`, i.e.
     ```
-    git clone https://github.com/uWebSockets/uWebSockets 
+    git clone https://github.com/uWebSockets/uWebSockets
     cd uWebSockets
     git checkout e94b6e1
     ```
@@ -31,7 +55,7 @@ Self-Driving Car Engineer Nanodegree Program
   * Mac: `brew install ipopt`
   * Linux
     * You will need a version of Ipopt 3.12.1 or higher. The version available through `apt-get` is 3.11.x. If you can get that version to work great but if not there's a script `install_ipopt.sh` that will install Ipopt. You just need to download the source from the Ipopt [releases page](https://www.coin-or.org/download/source/Ipopt/) or the [Github releases](https://github.com/coin-or/Ipopt/releases) page.
-    * Then call `install_ipopt.sh` with the source directory as the first argument, ex: `bash install_ipopt.sh Ipopt-3.12.1`. 
+    * Then call `install_ipopt.sh` with the source directory as the first argument, ex: `bash install_ipopt.sh Ipopt-3.12.1`.
   * Windows: TODO. If you can use the Linux subsystem and follow the Linux instructions.
 * [CppAD](https://www.coin-or.org/CppAD/)
   * Mac: `brew install cppad`
@@ -49,6 +73,73 @@ Self-Driving Car Engineer Nanodegree Program
 2. Make a build directory: `mkdir build && cd build`
 3. Compile: `cmake .. && make`
 4. Run it: `./mpc`.
+
+---
+
+## Model
+
+MPC stands for Model Predictive Control, so let's start with the model.
+
+In this project [kinematic bicycle model](http://www.me.berkeley.edu/~frborrel/pdfpub/IV_KinematicMPC_jason.pdf) is used. Here is classic drawing for derivation of model's equations:
+
+![alt text][image2]
+
+**x**, **y**, **psi** and **v** are state variables of the vehicle. Control inputs are **delta** (steering angle) and **a** - acceleration that isn't shown on drawing, but we assume it is directed along the vehicle axis.
+
+Drawing shows that velocity vector **v** forms angle **beta** with vehicle main axis. This is important for long vehicles or for vehicles with ability to steer by front and rear wheels, or drift.
+
+None of this is applicable to project, so we can assume  velocity vector is directed along main axis of vehicle. So **beta** is zero and drawing for this case looks like this:
+
+![alt text][image3]
+
+Using trig and formula for [angular velocity](https://en.wikipedia.org/wiki/angular_velocity), we can formulate following system of equations:
+
+![alt text][image4]
+
+where **a** is vehicle acceleration.  
+
+From right triangle with catheti of **R** and **Lf** we can derive equation for **R** , substitute to psi dot equation, and assume tan(delta) = delta for small values:
+
+![alt text][image5]
+
+So the final system of equations for project model is:
+
+![alt text][image6]
+
+Or in discrete case:
+
+![alt text][image7]
+
+## N and dt
+
+Two of all hyperparameters to tune throughout the project. N - number of timesteps and dt - prediction timstep between actuations. Rule of thumb of those two parameters are that we try to increase N and decrease dt as much as we can - result is compromise between those two values. In thise project after multiple test N=20 and dt=0.1 showed best results. If dt is to small or too big as previously tried 0.2 and 0.01 - the prediction line is not correct. Same with when increasing N to 30 or 10.
+
+## Waypoints
+
+To pass correct waypoints to simultor we first need to transform them in car coordinates as follow:
+
+```
+// Transform waypoints in car coordinates
+for (int i = 0; i < ptsx.size(); i++) {
+  way_x.push_back((ptsx[i] - px)*cos(psi) + (ptsy[i] - py)*sin(psi));
+  way_y.push_back(-(ptsx[i] - px)*sin(psi) + (ptsy[i] - py)*cos(psi));
+}
+```
+
+Ans then we format those waypoints from vector to Eigen. Then they are ready for polyfit. For this project py points were ignore to simplify model.
+
+## Latency
+
+To make project closer to real life artificial latency of 100ms was added between prediction and applying actuations. Thas can be easily solved by using discrete predicting function before solve.
+
+```
+// Predict state after latency before passing to the solver
+double dt = 0.1;
+px = v * dt;
+psi = -v * steer_angle * dt / 2.67;
+```
+
+---
 
 ## Tips
 
